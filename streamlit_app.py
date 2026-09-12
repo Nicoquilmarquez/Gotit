@@ -12,7 +12,7 @@ USUARIO_CORRECTO = "admin"
 CLAVE_CORRECTA = "123456"
 
 # API Key Fija precargada
-GEMINI_API_KEY_DEFAULT = ""
+GEMINI_API_KEY_DEFAULT =st.secrets.get("GEMINI_API_KEY", "")
 
 if "autenticado" not in st.session_state:
     st.session_state.autenticado = False
