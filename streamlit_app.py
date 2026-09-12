@@ -1,56 +1,161 @@
 import streamlit as st
-from openai import OpenAI
+import pandas as pd
+import os
+from google import genai
+from PIL import Image
 
-# Show title and description.
-st.title("💬 Chatbot")
-st.write(
-    "This is a simple chatbot that uses OpenAI's GPT-3.5 model to generate responses. "
-    "To use this app, you need to provide an OpenAI API key, which you can get [here](https://platform.openai.com/account/api-keys). "
-    "You can also learn how to build this app step by step by [following our tutorial](https://docs.streamlit.io/develop/tutorials/llms/build-conversational-apps)."
-)
+# Configuración de página
+st.set_page_config(page_title="Gotit - Asistente IA", page_icon="🤖", layout="wide")
 
-# Ask user for their OpenAI API key via `st.text_input`.
-# Alternatively, you can store the API key in `./.streamlit/secrets.toml` and access it
-# via `st.secrets`, see https://docs.streamlit.io/develop/concepts/connections/secrets-management
-openai_api_key = st.text_input("OpenAI API Key", type="password")
-if not openai_api_key:
-    st.info("Please add your OpenAI API key to continue.", icon="🗝️")
+# Credenciales de acceso a la app
+USUARIO_CORRECTO = "admin"
+CLAVE_CORRECTA = "123456"
+
+# API Key Fija precargada
+GEMINI_API_KEY_DEFAULT = ""
+
+if "autenticado" not in st.session_state:
+    st.session_state.autenticado = False
+
+# PANTALLA 1: LOGIN
+if not st.session_state.autenticado:
+    posibles_nombres = [
+        "gotit logo.jpg", "gotit logo.png", "gotit logo.jpeg",
+        "gotit logo.JPG", "gotit logo.PNG", "gotit logo.JPEG",
+        "gotit_logo.jpg", "gotit_logo.png", "logo.jpg", "logo.png"
+    ]
+    
+    imagen_cargada = None
+    for nombre in posibles_nombres:
+        if os.path.exists(nombre):
+            try:
+                imagen_cargada = Image.open(nombre)
+                break
+            except Exception:
+                pass
+
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        if imagen_cargada:
+            st.image(imagen_cargada, width=180)
+        else:
+            st.info("ℹ️ Guardá la imagen en la carpeta del proyecto como 'gotit logo.jpg'")
+
+        st.title("Hola soy Gotit, el asistente virtual de Aysa !")
+        st.subheader("Logueate para empezar a usarme.")
+        st.write("---")
+
+        usuario = st.text_input("Usuario")
+        clave = st.text_input("Contraseña", type="password")
+        
+        if st.button("Iniciar Sesión", type="primary", use_container_width=True):
+            if usuario == USUARIO_CORRECTO and clave == CLAVE_CORRECTA:
+                st.session_state.autenticado = True
+                st.rerun()
+            else:
+                st.error("Credenciales incorrectas")
+
+# PANTALLA 2: CHAT CON GEMINI
 else:
+    st.title("🤖 Asistente Virtual IA para Recursos Humanos")
 
-    # Create an OpenAI client.
-    client = OpenAI(api_key=openai_api_key)
+    with st.sidebar:
+        st.header("Configuración")
+        api_key = st.text_input("Gemini API Key:", value=GEMINI_API_KEY_DEFAULT, type="password")
+        opcion_base = st.selectbox("Seleccioná la base de datos:", ["Dota", "Registro", "Vacaciones"])
+        if st.button("Cerrar Sesión"):
+            st.session_state.autenticado = False
+            st.rerun()
 
-    # Create a session state variable to store the chat messages. This ensures that the
-    # messages persist across reruns.
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
+    @st.cache_data
+    def cargar_excel(nombre_base):
+        posibles = [nombre_base, f"{nombre_base}.xlsx", f"{nombre_base}.xls"]
+        for archivo in posibles:
+            if os.path.exists(archivo):
+                try:
+                    df = pd.read_excel(archivo)
+                    return df, archivo
+                except Exception:
+                    try:
+                        df = pd.read_csv(archivo)
+                        return df, archivo
+                    except Exception as e:
+                        return None, f"Error al leer {archivo}: {e}"
+        return None, f"No se encontró el archivo '{nombre_base}'."
 
-    # Display the existing chat messages via `st.chat_message`.
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
+    df, estado = cargar_excel(opcion_base)
 
-    # Create a chat input field to allow the user to enter a message. This will display
-    # automatically at the bottom of the page.
-    if prompt := st.chat_input("What is up?"):
+    if df is not None:
+        st.success(f"Base activa: **{opcion_base}** ({len(df)} registros cargados)")
+    else:
+        st.warning(f"⚠️ {estado}")
 
-        # Store and display the current prompt.
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(prompt)
+    if "mensajes" not in st.session_state:
+        st.session_state.mensajes = []
 
-        # Generate a response using the OpenAI API.
-        stream = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": m["role"], "content": m["content"]}
-                for m in st.session_state.messages
-            ],
-            stream=True,
-        )
+    for msg in st.session_state.mensajes:
+        with st.chat_message(msg["rol"]):
+            st.write(msg["contenido"])
 
-        # Stream the response to the chat using `st.write_stream`, then store it in 
-        # session state.
-        with st.chat_message("assistant"):
-            response = st.write_stream(stream)
-        st.session_state.messages.append({"role": "assistant", "content": response})
+    pregunta = st.chat_input(f"Preguntale algo a la IA sobre {opcion_base}...")
+
+    if pregunta:
+        if not api_key:
+            st.warning("⚠️ Configurá una Gemini API Key válida en el menú lateral.")
+        elif df is None:
+            st.error("⚠️ No hay base de datos cargada.")
+        else:
+            st.session_state.mensajes.append({"rol": "user", "contenido": pregunta})
+            with st.chat_message("user"):
+                st.write(pregunta)
+
+            resumen_csv = df.to_csv(index=False)
+
+            prompt = f"""
+            Sos un asistente virtual de Recursos Humanos. Analizá detenidamente los datos de la base '{opcion_base}':
+
+            {resumen_csv}
+
+            Pregunta del usuario: {pregunta}
+            Respondé con precisión, amabilidad y basándote únicamente en la información contenida en los datos provistos.
+            """
+
+            with st.chat_message("assistant"):
+                with st.spinner("La IA está analizando los datos..."):
+                    try:
+                        client = genai.Client(api_key=api_key)
+                        
+                        candidatos = ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-2.0-flash']
+                        response = None
+                        error_log = []
+
+                        for mod in candidatos:
+                            try:
+                                response = client.models.generate_content(
+                                    model=mod,
+                                    contents=prompt,
+                                )
+                                break
+                            except Exception as err:
+                                error_log.append(f"{mod}: {err}")
+
+                        if not response:
+                            modelos_lista = [m.name for m in client.models.list()]
+                            for mod in modelos_lista:
+                                try:
+                                    response = client.models.generate_content(
+                                        model=mod,
+                                        contents=prompt,
+                                    )
+                                    break
+                                except Exception:
+                                    continue
+
+                        if response:
+                            st.write(response.text)
+                            st.session_state.mensajes.append({"rol": "assistant", "contenido": response.text})
+                        else:
+                            st.error("No se pudo conectar a ningún modelo de tu API Key.")
+
+                    except Exception as e:
+                        st.error(f"Error al conectar con Gemini: {e}")
