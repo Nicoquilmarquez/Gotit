@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import os
+import pypdf
 from google import genai
 from PIL import Image
 
@@ -11,8 +12,8 @@ st.set_page_config(page_title="Gotit - Asistente IA", page_icon="🤖", layout="
 USUARIO_CORRECTO = "admin"
 CLAVE_CORRECTA = "123456"
 
-# API Key Fija precargada
-GEMINI_API_KEY_DEFAULT =st.secrets.get("GEMINI_API_KEY", "")
+# API Key tomada de Secrets de Streamlit o fallback vacio
+GEMINI_API_KEY_DEFAULT = st.secrets.get("GEMINI_API_KEY", "")
 
 if "autenticado" not in st.session_state:
     st.session_state.autenticado = False
@@ -55,38 +56,82 @@ if not st.session_state.autenticado:
             else:
                 st.error("Credenciales incorrectas")
 
-# PANTALLA 2: CHAT CON GEMINI
+# PANTALLA 2: CHAT CON GEMINI Y SOPORTE PARA EXCEL, PDF Y TXT (CONVENIO)
 else:
     st.title("🤖 Asistente Virtual IA para Recursos Humanos")
 
     with st.sidebar:
         st.header("Configuración")
         api_key = st.text_input("Gemini API Key:", value=GEMINI_API_KEY_DEFAULT, type="password")
-        opcion_base = st.selectbox("Seleccioná la base de datos:", ["Dota", "Registro", "Vacaciones"])
+        opcion_base = st.selectbox("Seleccioná la base de datos:", ["Dota", "Registro", "Vacaciones", "Convenio", "CCT1.txt"])
         if st.button("Cerrar Sesión"):
             st.session_state.autenticado = False
             st.rerun()
 
     @st.cache_data
-    def cargar_excel(nombre_base):
-        posibles = [nombre_base, f"{nombre_base}.xlsx", f"{nombre_base}.xls"]
+    def cargar_documento(nombre_base):
+        # Mapear nombres o extensiones probables
+        posibles = [
+            nombre_base, 
+            f"{nombre_base}.xlsx", f"{nombre_base}.xls", 
+            f"{nombre_base}.csv", f"{nombre_base}.txt", f"{nombre_base}.pdf",
+            f"{nombre_base.lower()}.txt", f"{nombre_base.upper()}.txt",
+            f"{nombre_base.lower()}.pdf", f"{nombre_base.upper()}.pdf"
+        ]
+        
+        # Si selecciona Convenio o CCT1, aseguramos buscar directamente CCT1.txt
+        if nombre_base in ["Convenio", "CCT1"]:
+            posibles.insert(0, "CCT1.txt")
+            posibles.insert(1, "cct1.txt")
+
         for archivo in posibles:
             if os.path.exists(archivo):
-                try:
-                    df = pd.read_excel(archivo)
-                    return df, archivo
-                except Exception:
+                # Soporte para archivos de texto plano (.txt)
+                if archivo.lower().endswith(".txt"):
                     try:
-                        df = pd.read_csv(archivo)
-                        return df, archivo
+                        with open(archivo, "r", encoding="utf-8", errors="ignore") as f:
+                            texto_txt = f.read()
+                        return ("txt", texto_txt), archivo
                     except Exception as e:
-                        return None, f"Error al leer {archivo}: {e}"
+                        return None, f"Error al leer archivo de texto '{archivo}': {e}"
+                
+                # Soporte para archivos PDF (.pdf)
+                elif archivo.lower().endswith(".pdf"):
+                    try:
+                        reader = pypdf.PdfReader(archivo)
+                        texto_pdf = ""
+                        for page in reader.pages:
+                            t = page.extract_text()
+                            if t:
+                                texto_pdf += t + "\n"
+                        return ("pdf", texto_pdf), archivo
+                    except Exception as e:
+                        return None, f"Error al leer PDF '{archivo}': {e}"
+                
+                # Soporte para planillas Excel y CSV
+                else:
+                    try:
+                        df = pd.read_excel(archivo)
+                        return ("df", df), archivo
+                    except Exception:
+                        try:
+                            df = pd.read_csv(archivo)
+                            return ("df", df), archivo
+                        except Exception as e:
+                            return None, f"Error al leer planilla '{archivo}': {e}"
+
         return None, f"No se encontró el archivo '{nombre_base}'."
 
-    df, estado = cargar_excel(opcion_base)
+    doc_info, estado = cargar_documento(opcion_base)
 
-    if df is not None:
-        st.success(f"Base activa: **{opcion_base}** ({len(df)} registros cargados)")
+    if doc_info is not None:
+        tipo, contenido_doc = doc_info
+        if tipo == "df":
+            st.success(f"Base activa: **{opcion_base}** ({len(contenido_doc)} registros cargados)")
+        elif tipo == "txt":
+            st.success(f"Documento de Texto activo: **{opcion_base}** (Cargado desde `{estado}`)")
+        else:
+            st.success(f"Documento PDF activo: **{opcion_base}** (Texto cargado correctamente)")
     else:
         st.warning(f"⚠️ {estado}")
 
@@ -102,22 +147,27 @@ else:
     if pregunta:
         if not api_key:
             st.warning("⚠️ Configurá una Gemini API Key válida en el menú lateral.")
-        elif df is None:
-            st.error("⚠️ No hay base de datos cargada.")
+        elif doc_info is None:
+            st.error("⚠️ No se pudo cargar el archivo seleccionado.")
         else:
             st.session_state.mensajes.append({"rol": "user", "contenido": pregunta})
             with st.chat_message("user"):
                 st.write(pregunta)
 
-            resumen_csv = df.to_csv(index=False)
+            tipo, contenido_doc = doc_info
+            if tipo == "df":
+                contexto_prompt = contenido_doc.to_csv(index=False)
+            else:
+                contexto_prompt = contenido_doc
 
             prompt = f"""
-            Sos un asistente virtual de Recursos Humanos. Analizá detenidamente los datos de la base '{opcion_base}':
+            Sos un asistente virtual de Recursos Humanos de AySA. 
+            Analizá detenidamente la información provista en la base/documento '{opcion_base}':
 
-            {resumen_csv}
+            {contexto_prompt}
 
             Pregunta del usuario: {pregunta}
-            Respondé con precisión, amabilidad y basándote únicamente en la información contenida en los datos provistos.
+            Respondé con precisión, amabilidad y basándote únicamente en la información contenida en el documento provisto.
             """
 
             with st.chat_message("assistant"):
