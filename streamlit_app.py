@@ -182,30 +182,31 @@ else:
                             )
                         )
                         
-                        # Modelos 100% compatibles con la v1beta de la API
+                        # Lista con nombres de modelos puros aceptados por la SDK actual
                         modelos_a_probar = [
-                            'models/gemini-2.5-flash',
-                            'models/gemini-2.0-flash',
-                            'models/gemini-1.5-flash'
+                            'gemini-2.0-flash',
+                            'gemini-1.5-flash',
+                            'gemini-2.5-flash'
                         ]
                         
-                        response = None
+                        response_text = None
                         ultimo_error = None
 
                         for modelo in modelos_a_probar:
                             try:
-                                response = client.models.generate_content(
+                                res = client.models.generate_content(
                                     model=modelo,
                                     contents=prompt,
                                 )
-                                if response and response.text:
+                                if res and hasattr(res, 'text') and res.text:
+                                    response_text = res.text
                                     break
                             except Exception as err:
                                 ultimo_error = err
 
-                        if response and response.text:
-                            st.write(response.text)
-                            st.session_state.mensajes.append({"rol": "assistant", "contenido": response.text})
+                        if response_text:
+                            st.write(response_text)
+                            st.session_state.mensajes.append({"rol": "assistant", "contenido": response_text})
                         else:
                             st.error(f"Error al conectar con la API de Gemini: {ultimo_error}")
 
