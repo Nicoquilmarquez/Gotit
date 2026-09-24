@@ -2,8 +2,8 @@ import streamlit as st
 import pandas as pd
 import os
 import pypdf
-import requests
 from PIL import Image
+from google import genai
 
 # Configuración de la página
 st.set_page_config(page_title="Gotit - Asistente IA", page_icon="🤖", layout="wide")
@@ -16,9 +16,7 @@ GEMINI_API_KEY_DEFAULT = st.secrets.get("GEMINI_API_KEY", "")
 if "autenticado" not in st.session_state:
     st.session_state.autenticado = False
 
-# ----------------------------------------------------
 # 1. PANTALLA DE LOGIN
-# ----------------------------------------------------
 if not st.session_state.autenticado:
     posibles_nombres = [
         "gotit logo.jpg", "gotit logo.png", "gotit logo.jpeg",
@@ -53,9 +51,7 @@ if not st.session_state.autenticado:
             else:
                 st.error("Credenciales incorrectas")
 
-# ----------------------------------------------------
 # 2. PANTALLA PRINCIPAL
-# ----------------------------------------------------
 else:
     st.title("🤖 Asistente Virtual IA - Consultas de RH")
 
@@ -170,49 +166,27 @@ else:
 
             INSTRUCCIONES:
             - Respondé de forma precisa, directa y clara.
-            - Contá o sumá los registros si el usuario pregunta 'cuanta gente hay' o cantidades.
+            - Contá o sumá los registros si el usuario pregunta cantidades o datos específicos.
             """
 
             with st.chat_message("assistant"):
-                with st.spinner("Gotit está analizando los datos..."):
+                with st.spinner("Gotit está analizando los datos con tu API Key..."):
                     try:
-                        key_clean = api_key.strip()
-                        headers = {"Content-Type": "application/json"}
-
-                        # 1. Obtener dinámicamente la lista de modelos disponibles para esta API Key
-                        list_url = f"https://generativelanguage.googleapis.com/v1beta/models?key={key_clean}"
-                        res_list = requests.get(list_url, headers=headers, timeout=15)
+                        # Inicializar cliente oficial con tu clave
+                        client = genai.Client(api_key=api_key.strip())
                         
-                        modelo_elegido = None
+                        # Llamada directa al modelo estándar con el SDK oficial
+                        response = client.models.generate_content(
+                            model='gemini-1.5-flash',
+                            contents=prompt_completo
+                        )
 
-                        if res_list.status_code == 200:
-                            data_models = res_list.json().get("models", [])
-                            for m in data_models:
-                                # Buscar modelos que acepten generación de contenido
-                                methods = m.get("supportedGenerationMethods", [])
-                                if "generateContent" in methods:
-                                    modelo_elegido = m.get("name") # ej: 'models/gemini-1.5-flash' o similar
-                                    break
-                        
-                        # Si no pudo listar, usar fallback por defecto
-                        if not modelo_elegido:
-                            modelo_elegido = "models/gemini-1.5-flash"
-
-                        # Remover prefijo si viniera duplicado
-                        nombre_modelo = modelo_elegido.replace("models/", "")
-
-                        # 2. Realizar la consulta a la API con el modelo verificado
-                        gen_url = f"https://generativelanguage.googleapis.com/v1beta/models/{nombre_modelo}:generateContent?key={key_clean}"
-                        payload = {"contents": [{"parts": [{"text": prompt_completo}]}]}
-
-                        res_gen = requests.post(gen_url, json=payload, headers=headers, timeout=45)
-
-                        if res_gen.status_code == 200:
-                            respuesta_final = res_gen.json()["candidates"][0]["content"]["parts"][0]["text"]
+                        if response and response.text:
+                            respuesta_final = response.text
                             st.write(respuesta_final)
                             st.session_state.mensajes.append({"rol": "assistant", "contenido": respuesta_final})
                         else:
-                            st.error(f"Error {res_gen.status_code} al consultar el modelo '{nombre_modelo}': {res_gen.text}")
+                            st.error("No se pudo obtener una respuesta de la IA.")
 
                     except Exception as ex:
-                        st.error(f"Error en la ejecución: {ex}")
+                        st.error(f"Error de ejecución con la API Key: {ex}")
