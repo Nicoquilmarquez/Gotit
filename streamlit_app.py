@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import os
 import pypdf
-import google.generativeai as genai
+import requests
 from PIL import Image
 
 # Configuración de página
@@ -12,7 +12,7 @@ st.set_page_config(page_title="Gotit - Asistente IA", page_icon="🤖", layout="
 USUARIO_CORRECTO = "admin"
 CLAVE_CORRECTA = "123456"
 
-# API Key desde Secrets de Streamlit
+# Toma la API Key desde Secrets de Streamlit Cloud
 GEMINI_API_KEY_DEFAULT = st.secrets.get("GEMINI_API_KEY", "")
 
 if "autenticado" not in st.session_state:
@@ -170,33 +170,33 @@ else:
                 with st.spinner("La IA está analizando los datos..."):
                     try:
                         clean_key = api_key.strip()
-                        genai.configure(api_key=clean_key, client_options={"api_endpoint": "generativelanguage.googleapis.com"})
                         
-                        # Fallback entre los modelos activos vigentes en la API
-                        modelos_vigentes = [
-                            "gemini-2.5-flash",
-                            "gemini-2.0-flash",
-                            "gemini-1.5-flash-latest"
-                        ]
+                        # Llamada REST directa al endpoint de Gemini sin SDKs intermedios
+                        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={clean_key}"
                         
-                        respuesta_exitosa = None
-                        ultimo_err = None
-
-                        for mod in modelos_vigentes:
-                            try:
-                                model = genai.GenerativeModel(mod)
-                                response = model.generate_content(prompt)
-                                if response and response.text:
-                                    respuesta_exitosa = response.text
-                                    break
-                            except Exception as ex:
-                                ultimo_err = ex
-
-                        if respuesta_exitosa:
-                            st.write(respuesta_exitosa)
-                            st.session_state.mensajes.append({"rol": "assistant", "contenido": respuesta_exitosa})
+                        headers = {
+                            "Content-Type": "application/json"
+                        }
+                        
+                        payload = {
+                            "contents": [
+                                {
+                                    "parts": [
+                                        {"text": prompt}
+                                    ]
+                                }
+                            ]
+                        }
+                        
+                        res = requests.post(url, json=payload, headers=headers, timeout=60)
+                        
+                        if res.status_code == 200:
+                            data = res.json()
+                            respuesta_texto = data["candidates"][0]["content"]["parts"][0]["text"]
+                            st.write(respuesta_texto)
+                            st.session_state.mensajes.append({"rol": "assistant", "contenido": respuesta_texto})
                         else:
-                            st.error(f"Error con los modelos de Gemini: {ultimo_err}")
+                            st.error(f"Error {res.status_code} desde Google: {res.text}")
 
                     except Exception as e:
-                        st.error(f"Error de conexión con Gemini: {e}")
+                        st.error(f"Error de ejecución: {e}")
