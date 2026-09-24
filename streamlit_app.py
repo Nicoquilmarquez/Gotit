@@ -54,7 +54,7 @@ if not st.session_state.autenticado:
             else:
                 st.error("Credenciales incorrectas")
 
-# PANTALLA 2: CHAT CON GEMINI Y DEPURACIÓN DE MODELOS
+# PANTALLA 2: CHAT CON GEMINI
 else:
     st.title("🤖 Asistente Virtual IA para Recursos Humanos")
 
@@ -186,12 +186,11 @@ else:
                     try:
                         clean_key = api_key.strip()
                         
-                        # Endpoints con estructura canónica 'models/NOMBRE:generateContent'
+                        # Usamos los nombres exactos confirmados por tu cuenta de Google AI Studio
                         candidates_endpoints = [
                             f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={clean_key}",
-                            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={clean_key}",
-                            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={clean_key}",
-                            f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={clean_key}"
+                            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key={clean_key}",
+                            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro-latest:generateContent?key={clean_key}"
                         ]
 
                         payload = {
@@ -228,4 +227,3 @@ else:
 
                     except Exception as e:
                         st.error(f"Error en la ejecución: {e}")
-                        
