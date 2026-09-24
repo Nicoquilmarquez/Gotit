@@ -178,13 +178,22 @@ else:
                     try:
                         client = genai.Client(api_key=api_key.strip())
                         
+                        # 1. Lista con el modelo exigido actualmente por Google
+                        modelos_candidatos = ['gemini-3.1-pro-preview', 'gemini-3.6-flash']
+                        
+                        # 2. Detección dinámica en tiempo real de los modelos activos de la API Key
+                        try:
+                            modelos_remotos = [m.name.replace("models/", "") for m in client.models.list()]
+                            modelos_validos = [m for m in modelos_remotos if "gemini" in m and "embed" not in m and "imagen" not in m]
+                            if modelos_validos:
+                                modelos_candidatos = modelos_validos + modelos_candidatos
+                        except Exception:
+                            pass
+
                         response = None
                         ultimo_error = None
                         
-                        # Lista segura de modelos estándar que acepta la API oficial
-                        modelos_a_probar = ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-2.5-pro']
-                        
-                        for mod in modelos_a_probar:
+                        for mod in modelos_candidatos:
                             try:
                                 response = client.models.generate_content(
                                     model=mod,
@@ -194,6 +203,7 @@ else:
                                     break
                             except Exception as e:
                                 ultimo_error = e
+                                time.sleep(1)
                                 continue
 
                         if response and response.text:
@@ -201,7 +211,7 @@ else:
                             st.write(respuesta_final)
                             st.session_state.mensajes.append({"rol": "assistant", "contenido": respuesta_final})
                         else:
-                            st.error(f"No se pudo conectar con los modelos disponibles. Detalle del error: {ultimo_error}")
+                            st.error(f"No se pudo conectar con la API de Google. Detalle: {ultimo_error}")
 
                     except Exception as ex:
                         st.error(f"Error procesando la consulta: {ex}")
