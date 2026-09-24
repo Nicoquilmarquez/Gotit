@@ -182,10 +182,12 @@ else:
                             )
                         )
                         
+                        # Lista de modelos corregida con el prefijo 'models/'
                         modelos_a_probar = [
-                            'gemini-2.5-flash',
-                            'gemini-2.0-flash',
-                            'gemini-1.5-flash'
+                            'models/gemini-2.5-flash',
+                            'models/gemini-2.0-flash',
+                            'models/gemini-1.5-flash',
+                            'models/gemini-1.5-pro'
                         ]
                         
                         response = None
