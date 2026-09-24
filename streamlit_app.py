@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import os
 import pypdf
+import time
 from PIL import Image
 from google import genai
 
@@ -170,40 +171,42 @@ else:
             """
 
             with st.chat_message("assistant"):
-                with st.spinner("Gotit está procesando la consulta..."):
+                with st.spinner("Gotit está conectando con la IA..."):
                     try:
                         client = genai.Client(api_key=api_key.strip())
                         
-                        # Lista completa de modelos para asegurar compatibilidad automática con cualquier API Key
+                        # Modelos ordenados para rotar en caso de saturación (Error 503)
                         modelos_a_probar = [
-                            'gemini-2.0-flash',
                             'gemini-1.5-flash',
                             'gemini-1.5-pro',
-                            'gemini-2.5-flash',
-                            'gemini-3.6-flash'
+                            'gemini-2.0-flash'
                         ]
 
                         response = None
                         ultimo_error = None
 
                         for mod in modelos_a_probar:
-                            try:
-                                response = client.models.generate_content(
-                                    model=mod,
-                                    contents=prompt_completo
-                                )
-                                if response and response.text:
-                                    break
-                            except Exception as e:
-                                ultimo_error = e
-                                continue
+                            for intento in range(2): # Reintentar dos veces por modelo si da alta demanda
+                                try:
+                                    response = client.models.generate_content(
+                                        model=mod,
+                                        contents=prompt_completo
+                                    )
+                                    if response and response.text:
+                                        break
+                                except Exception as e:
+                                    ultimo_error = e
+                                    time.sleep(1) # Esperar 1 segundo antes de reintentar
+                                    continue
+                            if response and response.text:
+                                break
 
                         if response and response.text:
                             respuesta_final = response.text
                             st.write(respuesta_final)
                             st.session_state.mensajes.append({"rol": "assistant", "contenido": respuesta_final})
                         else:
-                            st.error(f"No se pudo conectar con ningún modelo disponible. Detalle: {ultimo_error}")
+                            st.error(f"Los servidores de Google están saturados temporalmente (Error 503). Por favor, volvé a enviar tu consulta en unos segundos. Detalle: {ultimo_error}")
 
                     except Exception as ex:
                         st.error(f"Error general en la ejecución: {ex}")
