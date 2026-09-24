@@ -181,25 +181,27 @@ else:
                         response = None
                         ultimo_error = None
                         
-                        # Reintentos exclusivos sobre el modelo correcto gemini-3.6-flash
-                        for intento in range(4):
+                        # Lista segura de modelos estándar que acepta la API oficial
+                        modelos_a_probar = ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-2.5-pro']
+                        
+                        for mod in modelos_a_probar:
                             try:
                                 response = client.models.generate_content(
-                                    model='gemini-3.6-flash',
+                                    model=mod,
                                     contents=prompt_completo
                                 )
                                 if response and response.text:
                                     break
                             except Exception as e:
                                 ultimo_error = e
-                                time.sleep(2) # Espera 2 segundos y reintenta automáticamente
+                                continue
 
                         if response and response.text:
                             respuesta_final = response.text
                             st.write(respuesta_final)
                             st.session_state.mensajes.append({"rol": "assistant", "contenido": respuesta_final})
                         else:
-                            st.error(f"Los servidores están experimentando tráfico alto. Por favor, volvé a enviar la pregunta. Detalle: {ultimo_error}")
+                            st.error(f"No se pudo conectar con los modelos disponibles. Detalle del error: {ultimo_error}")
 
                     except Exception as ex:
                         st.error(f"Error procesando la consulta: {ex}")
