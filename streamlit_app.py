@@ -3,6 +3,7 @@ import pandas as pd
 import os
 import pypdf
 from google import genai
+from google.genai import types
 from PIL import Image
 
 # Configuración de página
@@ -12,7 +13,7 @@ st.set_page_config(page_title="Gotit - Asistente IA", page_icon="🤖", layout="
 USUARIO_CORRECTO = "admin"
 CLAVE_CORRECTA = "123456"
 
-# API Key tomada de Secrets de Streamlit o fallback vacio
+# Toma la API Key desde Secrets de Streamlit Cloud
 GEMINI_API_KEY_DEFAULT = st.secrets.get("GEMINI_API_KEY", "")
 
 if "autenticado" not in st.session_state:
@@ -56,7 +57,7 @@ if not st.session_state.autenticado:
             else:
                 st.error("Credenciales incorrectas")
 
-# PANTALLA 2: CHAT CON GEMINI Y SOPORTE PARA EXCEL, PDF Y TXT (CONVENIO)
+# PANTALLA 2: CHAT CON GEMINI Y SOPORTE PARA EXCEL, PDF Y TXT
 else:
     st.title("🤖 Asistente Virtual IA para Recursos Humanos")
 
@@ -70,32 +71,30 @@ else:
 
     @st.cache_data
     def cargar_documento(nombre_base):
-        # Mapear nombres o extensiones probables
         posibles = [
             nombre_base, 
             f"{nombre_base}.xlsx", f"{nombre_base}.xls", 
             f"{nombre_base}.csv", f"{nombre_base}.txt", f"{nombre_base}.pdf",
-            f"{nombre_base.lower()}.txt", f"{nombre_base.upper()}.txt",
-            f"{nombre_base.lower()}.pdf", f"{nombre_base.upper()}.pdf"
+            f"{nombre_base.lower()}.xlsx", f"{nombre_base.lower()}.xls",
+            f"{nombre_base.lower()}.csv", f"{nombre_base.lower()}.txt", f"{nombre_base.lower()}.pdf"
         ]
         
-        # Si selecciona Convenio o CCT1, aseguramos buscar directamente CCT1.txt
-        if nombre_base in ["Convenio", "CCT1"]:
+        if nombre_base in ["Convenio", "CCT1", "CCT1.txt"]:
             posibles.insert(0, "CCT1.txt")
             posibles.insert(1, "cct1.txt")
 
         for archivo in posibles:
             if os.path.exists(archivo):
-                # Soporte para archivos de texto plano (.txt)
+                # 1. Archivos TXT
                 if archivo.lower().endswith(".txt"):
                     try:
                         with open(archivo, "r", encoding="utf-8", errors="ignore") as f:
                             texto_txt = f.read()
                         return ("txt", texto_txt), archivo
                     except Exception as e:
-                        return None, f"Error al leer archivo de texto '{archivo}': {e}"
+                        return None, f"Error al leer TXT '{archivo}': {e}"
                 
-                # Soporte para archivos PDF (.pdf)
+                # 2. Archivos PDF
                 elif archivo.lower().endswith(".pdf"):
                     try:
                         reader = pypdf.PdfReader(archivo)
@@ -108,17 +107,18 @@ else:
                     except Exception as e:
                         return None, f"Error al leer PDF '{archivo}': {e}"
                 
-                # Soporte para planillas Excel y CSV
+                # 3. Planillas Excel y CSV
                 else:
                     try:
-                        df = pd.read_excel(archivo)
-                        return ("df", df), archivo
-                    except Exception:
-                        try:
+                        if archivo.lower().endswith((".xlsx", ".xls")):
+                            df = pd.read_excel(archivo)
+                        else:
                             df = pd.read_csv(archivo)
-                            return ("df", df), archivo
-                        except Exception as e:
-                            return None, f"Error al leer planilla '{archivo}': {e}"
+                        
+                        df = df.dropna(how="all").fillna("")
+                        return ("df", df), archivo
+                    except Exception as e:
+                        return None, f"Error al leer planilla '{archivo}': {e}"
 
         return None, f"No se encontró el archivo '{nombre_base}'."
 
@@ -127,7 +127,7 @@ else:
     if doc_info is not None:
         tipo, contenido_doc = doc_info
         if tipo == "df":
-            st.success(f"Base activa: **{opcion_base}** ({len(contenido_doc)} registros cargados)")
+            st.success(f"Base activa: **{opcion_base}** ({len(contenido_doc)} registros cargados desde `{estado}`)")
         elif tipo == "txt":
             st.success(f"Documento de Texto activo: **{opcion_base}** (Cargado desde `{estado}`)")
         else:
@@ -146,7 +146,7 @@ else:
 
     if pregunta:
         if not api_key:
-            st.warning("⚠️ Configurá una Gemini API Key válida en el menú lateral.")
+            st.warning("⚠️ Configurá tu Gemini API Key en el menú lateral.")
         elif doc_info is None:
             st.error("⚠️ No se pudo cargar el archivo seleccionado.")
         else:
@@ -156,7 +156,7 @@ else:
 
             tipo, contenido_doc = doc_info
             if tipo == "df":
-                contexto_prompt = contenido_doc.to_csv(index=False)
+                contexto_prompt = contenido_doc.to_string(index=False)
             else:
                 contexto_prompt = contenido_doc
 
@@ -173,39 +173,40 @@ else:
             with st.chat_message("assistant"):
                 with st.spinner("La IA está analizando los datos..."):
                     try:
-                        client = genai.Client(api_key=api_key)
+                        clean_key = api_key.strip()
                         
-                        candidatos = ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-2.0-flash']
+                        client = genai.Client(
+                            api_key=clean_key,
+                            http_options=types.HttpOptions(
+                                headers={"x-goog-api-key": clean_key}
+                            )
+                        )
+                        
+                        modelos_a_probar = [
+                            'gemini-2.5-flash',
+                            'gemini-2.0-flash',
+                            'gemini-1.5-flash'
+                        ]
+                        
                         response = None
-                        error_log = []
+                        ultimo_error = None
 
-                        for mod in candidatos:
+                        for modelo in modelos_a_probar:
                             try:
                                 response = client.models.generate_content(
-                                    model=mod,
+                                    model=modelo,
                                     contents=prompt,
                                 )
-                                break
-                            except Exception as err:
-                                error_log.append(f"{mod}: {err}")
-
-                        if not response:
-                            modelos_lista = [m.name for m in client.models.list()]
-                            for mod in modelos_lista:
-                                try:
-                                    response = client.models.generate_content(
-                                        model=mod,
-                                        contents=prompt,
-                                    )
+                                if response and response.text:
                                     break
-                                except Exception:
-                                    continue
+                            except Exception as err:
+                                ultimo_error = err
 
-                        if response:
+                        if response and response.text:
                             st.write(response.text)
                             st.session_state.mensajes.append({"rol": "assistant", "contenido": response.text})
                         else:
-                            st.error("No se pudo conectar a ningún modelo de tu API Key.")
+                            st.error(f"Error al conectar con la API de Gemini: {ultimo_error}")
 
                     except Exception as e:
-                        st.error(f"Error al conectar con Gemini: {e}")
+                        st.error(f"Error de conexión: {e}")
