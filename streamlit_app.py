@@ -147,10 +147,15 @@ else:
             tipo, contenido = doc_info
             contexto_str = ""
 
+            # Manejo optimizado para evitar desbordes con Excels grandes
             if tipo == "excel":
                 for hoja, df in contenido.items():
-                    contexto_str += f"\n--- HOJA: {hoja} ---\n"
-                    contexto_str += df.to_string(index=False) + "\n"
+                    contexto_str += f"\n--- HOJA: {hoja} (Total filas: {len(df)}) ---\n"
+                    # Si el dataframe es gigantesco, tomamos una muestra representativa o las primeras 500 filas
+                    if len(df) > 500:
+                        contexto_str += df.head(500).to_string(index=False) + "\n[... Tabla truncada a 500 filas por límite de tamaño ...]\n"
+                    else:
+                        contexto_str += df.to_string(index=False) + "\n"
             else:
                 contexto_str = contenido[:25000]
 
@@ -174,9 +179,9 @@ else:
                     try:
                         client = genai.Client(api_key=api_key.strip())
                         
-                        # Uso exclusivo y directo del modelo oficial exigido por la API Key
+                        # Usamos gemini-flash-latest para máxima compatibilidad con tablas y texto
                         response = client.models.generate_content(
-                            model='gemini-3.6-flash',
+                            model='gemini-flash-latest',
                             contents=prompt_completo
                         )
 
@@ -188,4 +193,4 @@ else:
                             st.error("No se pudo obtener respuesta del modelo.")
 
                     except Exception as ex:
-                        st.error(f"Error en la ejecución: {ex}")
+                        st.error(f"Error procesando los datos de Excel: {ex}")
