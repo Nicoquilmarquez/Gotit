@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import os
 import pypdf
+import time
 from PIL import Image
 from google import genai
 
@@ -173,22 +174,32 @@ else:
             """
 
             with st.chat_message("assistant"):
-                with st.spinner("Gotit está procesando la consulta..."):
+                with st.spinner("Gotit está conectando con la IA (reintentando si hay alta demanda)..."):
                     try:
                         client = genai.Client(api_key=api_key.strip())
                         
-                        # Usando estrictamente el modelo correcto gemini-3.6-flash
-                        response = client.models.generate_content(
-                            model='gemini-3.6-flash',
-                            contents=prompt_completo
-                        )
+                        response = None
+                        ultimo_error = None
+                        
+                        # Sistema de reintentos automáticos ante saturación de Google (503)
+                        for intento in range(4):
+                            try:
+                                response = client.models.generate_content(
+                                    model='gemini-3.6-flash',
+                                    contents=prompt_completo
+                                )
+                                if response and response.text:
+                                    break
+                            except Exception as e:
+                                ultimo_error = e
+                                time.sleep(2) # Espera 2 segundos antes del siguiente intento automático
 
                         if response and response.text:
                             respuesta_final = response.text
                             st.write(respuesta_final)
                             st.session_state.mensajes.append({"rol": "assistant", "contenido": respuesta_final})
                         else:
-                            st.error("No se pudo obtener respuesta del modelo.")
+                            st.error(f"Google sigue saturado temporalmente. Por favor, probá de nuevo en unos segundos. Detalle técnico: {ultimo_error}")
 
                     except Exception as ex:
                         st.error(f"Error procesando la consulta: {ex}")
