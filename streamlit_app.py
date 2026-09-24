@@ -5,14 +5,14 @@ import pypdf
 import requests
 from PIL import Image
 
-# Configuración de página
+# Configuración de la página
 st.set_page_config(page_title="Gotit - Asistente IA", page_icon="🤖", layout="wide")
 
 # Credenciales de acceso a la app
 USUARIO_CORRECTO = "admin"
 CLAVE_CORRECTA = "123456"
 
-# Toma la API Key desde Secrets de Streamlit Cloud
+# Toma la API Key desde Secrets de Streamlit Cloud o se ingresa en el menú lateral
 GEMINI_API_KEY_DEFAULT = st.secrets.get("GEMINI_API_KEY", "")
 
 if "autenticado" not in st.session_state:
@@ -84,6 +84,7 @@ else:
 
         for archivo in posibles:
             if os.path.exists(archivo):
+                # 1. Archivos de texto (.txt)
                 if archivo.lower().endswith(".txt"):
                     try:
                         with open(archivo, "r", encoding="utf-8", errors="ignore") as f:
@@ -92,6 +93,7 @@ else:
                     except Exception as e:
                         return None, f"Error al leer TXT '{archivo}': {e}"
                 
+                # 2. Archivos PDF (.pdf)
                 elif archivo.lower().endswith(".pdf"):
                     try:
                         reader = pypdf.PdfReader(archivo)
@@ -104,6 +106,7 @@ else:
                     except Exception as e:
                         return None, f"Error al leer PDF '{archivo}': {e}"
                 
+                # 3. Planillas Excel y CSV
                 else:
                     try:
                         if archivo.lower().endswith((".xlsx", ".xls")):
@@ -171,13 +174,12 @@ else:
                     try:
                         clean_key = api_key.strip()
                         
-                        # Llamada REST directa al endpoint de Gemini sin SDKs intermedios
-                        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={clean_key}"
-                        
-                        headers = {
-                            "Content-Type": "application/json"
-                        }
-                        
+                        modelos_endpoints = [
+                            "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+                            "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent",
+                            "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+                        ]
+
                         payload = {
                             "contents": [
                                 {
@@ -187,16 +189,29 @@ else:
                                 }
                             ]
                         }
-                        
-                        res = requests.post(url, json=payload, headers=headers, timeout=60)
-                        
-                        if res.status_code == 200:
-                            data = res.json()
-                            respuesta_texto = data["candidates"][0]["content"]["parts"][0]["text"]
+
+                        headers = {
+                            "Content-Type": "application/json",
+                            "x-goog-api-key": clean_key
+                        }
+
+                        respuesta_texto = None
+                        ultimo_error = None
+
+                        for url_endpoint in modelos_endpoints:
+                            res = requests.post(url_endpoint, json=payload, headers=headers, timeout=60)
+                            if res.status_code == 200:
+                                data = res.json()
+                                respuesta_texto = data["candidates"][0]["content"]["parts"][0]["text"]
+                                break
+                            else:
+                                ultimo_error = f"HTTP {res.status_code}: {res.text}"
+
+                        if respuesta_texto:
                             st.write(respuesta_texto)
                             st.session_state.mensajes.append({"rol": "assistant", "contenido": respuesta_texto})
                         else:
-                            st.error(f"Error {res.status_code} desde Google: {res.text}")
+                            st.error(f"Error al conectar con la API de Gemini: {ultimo_error}")
 
                     except Exception as e:
                         st.error(f"Error de ejecución: {e}")
