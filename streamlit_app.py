@@ -5,7 +5,7 @@ import pypdf
 import requests
 from PIL import Image
 
-# 1. Configuración de página
+# Configuración de página
 st.set_page_config(page_title="Gotit - Asistente IA", page_icon="🤖", layout="wide")
 
 USUARIO_CORRECTO = "admin"
@@ -16,7 +16,7 @@ GEMINI_API_KEY_DEFAULT = st.secrets.get("GEMINI_API_KEY", "")
 if "autenticado" not in st.session_state:
     st.session_state.autenticado = False
 
-# 2. PANTALLA DE LOGIN
+# 1. PANTALLA DE LOGIN
 if not st.session_state.autenticado:
     posibles_nombres = [
         "gotit logo.jpg", "gotit logo.png", "gotit logo.jpeg",
@@ -51,7 +51,7 @@ if not st.session_state.autenticado:
             else:
                 st.error("Credenciales incorrectas")
 
-# 3. PANTALLA PRINCIPAL (CHAT CON DATOS)
+# 2. PANTALLA PRINCIPAL Y CONSULTA IA
 else:
     st.title("🤖 Asistente Virtual IA - Consultas de RH")
 
@@ -67,7 +67,6 @@ else:
             st.session_state.autenticado = False
             st.rerun()
 
-    # Función unificada de lectura de archivos y todas sus hojas
     @st.cache_data
     def cargar_documento(nombre_base):
         archivos = os.listdir(".")
@@ -80,7 +79,7 @@ else:
                 break
 
         if not archivo_encontrado:
-            return None, f"No se encontró el archivo '{nombre_base}' en el directorio."
+            return None, f"No se encontró el archivo '{nombre_base}'."
 
         ext = os.path.splitext(archivo_encontrado)[1].lower()
         
@@ -151,30 +150,37 @@ else:
             if tipo == "excel":
                 for hoja, df in contenido.items():
                     contexto_str += f"\n--- HOJA: {hoja} ---\n"
-                    contexto_str += df.head(250).to_string(index=False) + "\n"
+                    contexto_str += df.to_string(index=False) + "\n"
             else:
-                contexto_str = contenido[:20000]
+                contexto_str = contenido[:25000]
 
             prompt_completo = f"""
-            Sos 'Gotit', asistente virtual de Recursos Humanos. 
-            Basándote en los datos del documento '{opcion_base}' ({nombre_real_archivo}):
+            Sos 'Gotit', el asistente virtual de Recursos Humanos de AySA. 
+            Basándote únicamente en la información provista en el documento '{opcion_base}' ({nombre_real_archivo}):
 
+            DATOS:
             {contexto_str}
 
-            PREGUNTA DEL USUARIO: {pregunta}
+            PREGUNTA DEL USUARIO:
+            {pregunta}
 
-            Respondé con precisión y claridad profesional en base a la información provista.
+            INSTRUCCIONES:
+            - Respondé de forma precisa, directa y clara.
+            - Contá o sumá los registros si el usuario pregunta 'cuanta gente hay' o cantidades.
             """
 
             with st.chat_message("assistant"):
-                with st.spinner("Procesando consulta..."):
+                with st.spinner("Gotit está analizando los datos..."):
                     try:
                         key_clean = api_key.strip()
-                        
-                        # Endpoints HTTP estándar para máxima compatibilidad
-                        endpoints = [
-                            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={key_clean}",
-                            f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={key_clean}"
+
+                        # Lista de nombres exactos aceptados por la API
+                        modelos_candidatos = [
+                            "gemini-1.5-flash-latest",
+                            "gemini-2.0-flash",
+                            "gemini-2.0-flash-exp",
+                            "gemini-1.5-pro",
+                            "gemini-flash"
                         ]
 
                         payload = {
@@ -187,22 +193,23 @@ else:
                         }
 
                         respuesta_final = None
-                        error_detalle = ""
+                        errores = []
 
-                        for url in endpoints:
+                        for mod in modelos_candidatos:
+                            url = f"https://generativelanguage.googleapis.com/v1beta/models/{mod}:generateContent?key={key_clean}"
                             res = requests.post(url, json=payload, headers=headers, timeout=45)
                             if res.status_code == 200:
                                 res_json = res.json()
                                 respuesta_final = res_json["candidates"][0]["content"]["parts"][0]["text"]
                                 break
                             else:
-                                error_detalle += f"[{res.status_code}] {res.text} "
+                                errores.append(f"Model {mod}: HTTP {res.status_code}")
 
                         if respuesta_final:
                             st.write(respuesta_final)
                             st.session_state.mensajes.append({"rol": "assistant", "contenido": respuesta_final})
                         else:
-                            st.error(f"Error de comunicación con la API: {error_detalle}")
+                            st.error(f"No se pudo consultar la API. Detalles: {', '.join(errores)}")
 
                     except Exception as ex:
-                        st.error(f"Error en la ejecución: {ex}")
+                        st.error(f"Error inesperado: {ex}")
