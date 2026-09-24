@@ -63,22 +63,6 @@ else:
         api_key = st.text_input("Gemini API Key:", value=GEMINI_API_KEY_DEFAULT, type="password")
         opcion_base = st.selectbox("Seleccioná la base de datos:", ["Dota", "Registro", "Vacaciones", "Convenio", "CCT1.txt"])
         
-        if st.button("Probar Modelos Disponibles"):
-            if not api_key:
-                st.error("Ingresá tu API Key primero.")
-            else:
-                clean_k = api_key.strip()
-                test_url = f"https://generativelanguage.googleapis.com/v1beta/models?key={clean_k}"
-                r = requests.get(test_url)
-                if r.status_code == 200:
-                    models_list = r.json().get("models", [])
-                    st.success("Modelos habilitados para tu API Key:")
-                    for m in models_list:
-                        if "generateContent" in m.get("supportedGenerationMethods", []):
-                            st.write(f"- `{m['name']}`")
-                else:
-                    st.error(f"Error listando modelos: {r.status_code} - {r.text}")
-
         if st.button("Cerrar Sesión"):
             st.session_state.autenticado = False
             st.rerun()
@@ -166,19 +150,24 @@ else:
                 st.write(pregunta)
 
             tipo, contenido_doc = doc_info
+            
+            # Recorte seguro de datos para evitar exceder límites de tokens/cuota free
             if tipo == "df":
-                contexto_prompt = contenido_doc.to_string(index=False)
+                if len(contenido_doc) > 200:
+                    contexto_prompt = contenido_doc.head(200).to_string(index=False)
+                else:
+                    contexto_prompt = contenido_doc.to_string(index=False)
             else:
-                contexto_prompt = contenido_doc
+                contexto_prompt = contenido_doc[:15000]
 
             prompt = f"""
-            Sos un asistente virtual de Recursos Humanos de AySA. 
-            Analizá detenidamente la información provista en la base/documento '{opcion_base}':
+            Sos Gotit, el asistente virtual de Recursos Humanos de AySA. 
+            Analizá detenidamente la información de la base/documento '{opcion_base}':
 
             {contexto_prompt}
 
             Pregunta del usuario: {pregunta}
-            Respondé con precisión, amabilidad y basándote únicamente en la información contenida en el documento provisto.
+            Respondé con precisión, profesionalismo y basándote en los datos provistos.
             """
 
             with st.chat_message("assistant"):
@@ -186,11 +175,10 @@ else:
                     try:
                         clean_key = api_key.strip()
                         
-                        # Usamos los nombres exactos confirmados por tu cuenta de Google AI Studio
+                        # Usamos únicamente gemini-1.5-flash y gemini-2.5-flash optimizados para cuota gratis
                         candidates_endpoints = [
-                            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={clean_key}",
-                            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key={clean_key}",
-                            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro-latest:generateContent?key={clean_key}"
+                            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={clean_key}",
+                            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={clean_key}"
                         ]
 
                         payload = {
@@ -223,7 +211,7 @@ else:
                             st.write(respuesta_texto)
                             st.session_state.mensajes.append({"rol": "assistant", "contenido": respuesta_texto})
                         else:
-                            st.error(f"Error con la API: {ultimo_error}")
+                            st.error(f"Límite de la API alcanzado. Esperá 30 segundos y probá de nuevo. Detalle: {ultimo_error}")
 
                     except Exception as e:
                         st.error(f"Error en la ejecución: {e}")
