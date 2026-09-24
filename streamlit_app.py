@@ -2,10 +2,11 @@ import streamlit as st
 import pandas as pd
 import os
 import pypdf
-import requests
 from PIL import Image
+from google import genai
+from google.genai import types
 
-# Configuración de página
+# Configuración inicial de la app
 st.set_page_config(page_title="Gotit - Asistente IA", page_icon="🤖", layout="wide")
 
 USUARIO_CORRECTO = "admin"
@@ -16,11 +17,12 @@ GEMINI_API_KEY_DEFAULT = st.secrets.get("GEMINI_API_KEY", "")
 if "autenticado" not in st.session_state:
     st.session_state.autenticado = False
 
+# ----------------------------------------------------
 # PANTALLA 1: LOGIN
+# ----------------------------------------------------
 if not st.session_state.autenticado:
     posibles_nombres = [
         "gotit logo.jpg", "gotit logo.png", "gotit logo.jpeg",
-        "gotit logo.JPG", "gotit logo.PNG", "gotit logo.JPEG",
         "gotit_logo.jpg", "gotit_logo.png", "logo.jpg", "logo.png"
     ]
     
@@ -37,11 +39,9 @@ if not st.session_state.autenticado:
     with col2:
         if imagen_cargada:
             st.image(imagen_cargada, width=180)
-        else:
-            st.info("ℹ️ Guardá la imagen en la carpeta del proyecto como 'gotit logo.jpg'")
-
-        st.title("Hola soy Gotit, el asistente virtual de Aysa !")
-        st.subheader("Logueate para empezar a usarme.")
+        
+        st.title("Hola, soy Gotit")
+        st.subheader("Asistente Virtual para Recursos Humanos")
         st.write("---")
 
         usuario = st.text_input("Usuario")
@@ -54,81 +54,82 @@ if not st.session_state.autenticado:
             else:
                 st.error("Credenciales incorrectas")
 
-# PANTALLA 2: CHAT CON GEMINI
+# ----------------------------------------------------
+# PANTALLA 2: CONSULTAS POR BASE / HOJA DE DATOS
+# ----------------------------------------------------
 else:
-    st.title("🤖 Asistente Virtual IA para Recursos Humanos")
+    st.title("🤖 Asistente Virtual IA - Consultas de RH")
 
     with st.sidebar:
         st.header("Configuración")
         api_key = st.text_input("Gemini API Key:", value=GEMINI_API_KEY_DEFAULT, type="password")
-        opcion_base = st.selectbox("Seleccioná la base de datos:", ["Dota", "Registro", "Vacaciones", "Convenio", "CCT1.txt"])
+        opcion_base = st.selectbox(
+            "Seleccioná la base de datos o documento:", 
+            ["Dota", "Registro", "Vacaciones", "Convenio", "CCT1.txt"]
+        )
         
         if st.button("Cerrar Sesión"):
             st.session_state.autenticado = False
             st.rerun()
 
+    # Carga dinámica de cualquier archivo u hoja seleccionada
     @st.cache_data
     def cargar_documento(nombre_base):
-        posibles = [
-            nombre_base, 
-            f"{nombre_base}.xlsx", f"{nombre_base}.xls", 
-            f"{nombre_base}.csv", f"{nombre_base}.txt", f"{nombre_base}.pdf",
-            f"{nombre_base.lower()}.xlsx", f"{nombre_base.lower()}.xls",
-            f"{nombre_base.lower()}.csv", f"{nombre_base.lower()}.txt", f"{nombre_base.lower()}.pdf"
-        ]
+        archivos = os.listdir(".")
+        target = nombre_base.lower().replace(".txt", "").strip()
         
-        if nombre_base in ["Convenio", "CCT1", "CCT1.txt"]:
-            posibles.insert(0, "CCT1.txt")
-            posibles.insert(1, "cct1.txt")
+        archivo_encontrado = None
+        for f in archivos:
+            if target in f.lower():
+                archivo_encontrado = f
+                break
 
-        for archivo in posibles:
-            if os.path.exists(archivo):
-                if archivo.lower().endswith(".txt"):
-                    try:
-                        with open(archivo, "r", encoding="utf-8", errors="ignore") as f:
-                            texto_txt = f.read()
-                        return ("txt", texto_txt), archivo
-                    except Exception as e:
-                        return None, f"Error al leer TXT '{archivo}': {e}"
-                
-                elif archivo.lower().endswith(".pdf"):
-                    try:
-                        reader = pypdf.PdfReader(archivo)
-                        texto_pdf = ""
-                        for page in reader.pages:
-                            t = page.extract_text()
-                            if t:
-                                texto_pdf += t + "\n"
-                        return ("pdf", texto_pdf), archivo
-                    except Exception as e:
-                        return None, f"Error al leer PDF '{archivo}': {e}"
-                
-                else:
-                    try:
-                        if archivo.lower().endswith((".xlsx", ".xls")):
-                            df = pd.read_excel(archivo)
-                        else:
-                            df = pd.read_csv(archivo)
-                        
-                        df = df.dropna(how="all").fillna("")
-                        return ("df", df), archivo
-                    except Exception as e:
-                        return None, f"Error al leer planilla '{archivo}': {e}"
+        if not archivo_encontrado:
+            return None, f"No se encontró el archivo relacionado con '{nombre_base}'."
 
-        return None, f"No se encontró el archivo '{nombre_base}'."
+        ext = os.path.splitext(archivo_encontrado)[1].lower()
+        
+        try:
+            if ext in [".xlsx", ".xls"]:
+                xls = pd.ExcelFile(archivo_encontrado)
+                contenido_hojas = {}
+                for h in xls.sheet_names:
+                    df = pd.read_excel(xls, sheet_name=h)
+                    df = df.dropna(how="all").fillna("")
+                    contenido_hojas[h] = df
+                return ("excel", contenido_hojas), archivo_encontrado
 
-    doc_info, estado = cargar_documento(opcion_base)
+            elif ext == ".csv":
+                df = pd.read_csv(archivo_encontrado)
+                df = df.dropna(how="all").fillna("")
+                return ("excel", {"Datos": df}), archivo_encontrado
+
+            elif ext == ".pdf":
+                reader = pypdf.PdfReader(archivo_encontrado)
+                texto = "\n".join([p.extract_text() for p in reader.pages if p.extract_text()])
+                return ("texto", texto), archivo_encontrado
+
+            elif ext in [".txt", ".md"]:
+                with open(archivo_encontrado, "r", encoding="utf-8", errors="ignore") as f:
+                    texto = f.read()
+                return ("texto", texto), archivo_encontrado
+
+        except Exception as e:
+            return None, f"Error cargando {archivo_encontrado}: {e}"
+
+        return None, "Formato no soportado."
+
+    doc_info, nombre_real_archivo = cargar_documento(opcion_base)
 
     if doc_info is not None:
-        tipo, contenido_doc = doc_info
-        if tipo == "df":
-            st.success(f"Base activa: **{opcion_base}** ({len(contenido_doc)} registros cargados desde `{estado}`)")
-        elif tipo == "txt":
-            st.success(f"Documento de Texto activo: **{opcion_base}** (Cargado desde `{estado}`)")
+        tipo, contenido = doc_info
+        if tipo == "excel":
+            filas_totales = sum(len(df) for df in contenido.values())
+            st.success(f"Base activa: **{opcion_base}** (`{nombre_real_archivo}`) — {filas_totales} filas cargadas en {len(contenido)} hoja(s).")
         else:
-            st.success(f"Documento PDF activo: **{opcion_base}** (Texto cargado correctamente)")
+            st.success(f"Documento activo: **{opcion_base}** (`{nombre_real_archivo}`) listo para consultas.")
     else:
-        st.warning(f"⚠️ {estado}")
+        st.warning(f"⚠️ {nombre_real_archivo}")
 
     if "mensajes" not in st.session_state:
         st.session_state.mensajes = []
@@ -137,81 +138,70 @@ else:
         with st.chat_message(msg["rol"]):
             st.write(msg["contenido"])
 
-    pregunta = st.chat_input(f"Preguntale algo a la IA sobre {opcion_base}...")
+    pregunta = st.chat_input(f"Preguntale algo a Gotit sobre {opcion_base}...")
 
     if pregunta:
         if not api_key:
-            st.warning("⚠️ Configurá tu Gemini API Key en el menú lateral.")
+            st.warning("⚠️ Configurá tu Gemini API Key en la barra lateral.")
         elif doc_info is None:
-            st.error("⚠️ No se pudo cargar el archivo seleccionado.")
+            st.error("⚠️ No se pudo leer la información de la base de datos.")
         else:
             st.session_state.mensajes.append({"rol": "user", "contenido": pregunta})
             with st.chat_message("user"):
                 st.write(pregunta)
 
-            tipo, contenido_doc = doc_info
-            
-            # Recorte seguro de datos para evitar exceder límites de tokens/cuota free
-            if tipo == "df":
-                if len(contenido_doc) > 200:
-                    contexto_prompt = contenido_doc.head(200).to_string(index=False)
-                else:
-                    contexto_prompt = contenido_doc.to_string(index=False)
+            tipo, contenido = doc_info
+            contexto_str = ""
+
+            if tipo == "excel":
+                for hoja, df in contenido.items():
+                    contexto_str += f"\n--- HOJA: {hoja} ---\n"
+                    contexto_str += df.to_string(index=False) + "\n"
             else:
-                contexto_prompt = contenido_doc[:15000]
+                contexto_str = contenido[:30000]
 
-            prompt = f"""
-            Sos Gotit, el asistente virtual de Recursos Humanos de AySA. 
-            Analizá detenidamente la información de la base/documento '{opcion_base}':
+            prompt_completo = f"""
+            Sos 'Gotit', el asistente inteligente de Recursos Humanos.
+            Usá la información de la base/documento '{opcion_base}' ({nombre_real_archivo}) para responder:
 
-            {contexto_prompt}
+            DATOS:
+            {contexto_str}
 
-            Pregunta del usuario: {pregunta}
-            Respondé con precisión, profesionalismo y basándote en los datos provistos.
+            PREGUNTA DEL USUARIO:
+            {pregunta}
+
+            INSTRUCCIONES:
+            - Respondé de forma precisa y profesional basándote en los datos.
+            - Si hay múltiples hojas o filas, cruzá la información necesaria para responder correctamente.
             """
 
             with st.chat_message("assistant"):
-                with st.spinner("La IA está analizando los datos..."):
+                with st.spinner("Procesando consulta con la IA..."):
                     try:
-                        clean_key = api_key.strip()
-                        
-                        # Usamos únicamente gemini-1.5-flash y gemini-2.5-flash optimizados para cuota gratis
-                        candidates_endpoints = [
-                            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={clean_key}",
-                            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={clean_key}"
-                        ]
+                        # Inicializar el cliente oficial del SDK
+                        client = genai.Client(api_key=api_key.strip())
 
-                        payload = {
-                            "contents": [
-                                {
-                                    "parts": [
-                                        {"text": prompt}
-                                    ]
-                                }
-                            ]
-                        }
-
-                        headers = {
-                            "Content-Type": "application/json"
-                        }
-
+                        # Probar modelos disponibles de la serie Gemini
+                        modelos_a_probar = ["gemini-2.0-flash", "gemini-1.5-flash"]
                         respuesta_texto = None
-                        ultimo_error = None
 
-                        for ep in candidates_endpoints:
-                            res = requests.post(ep, json=payload, headers=headers, timeout=60)
-                            if res.status_code == 200:
-                                data = res.json()
-                                respuesta_texto = data["candidates"][0]["content"]["parts"][0]["text"]
-                                break
-                            else:
-                                ultimo_error = f"HTTP {res.status_code}: {res.text}"
+                        for mod in modelos_a_probar:
+                            try:
+                                response = client.models.generate_content(
+                                    model=mod,
+                                    contents=prompt_completo,
+                                )
+                                respuesta_texto = response.text
+                                if respuesta_texto:
+                                    break
+                            except Exception:
+                                continue
 
                         if respuesta_texto:
                             st.write(respuesta_texto)
                             st.session_state.mensajes.append({"rol": "assistant", "contenido": respuesta_texto})
                         else:
-                            st.error(f"Límite de la API alcanzado. Esperá 30 segundos y probá de nuevo. Detalle: {ultimo_error}")
+                            st.error("No se pudo obtener respuesta del modelo. Verificá que la API Key sea válida.")
 
-                    except Exception as e:
-                        st.error(f"Error en la ejecución: {e}")
+                    except Exception as ex:
+                        st.error(f"Error durante la ejecución: {ex}")
