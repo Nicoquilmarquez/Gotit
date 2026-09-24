@@ -182,12 +182,11 @@ else:
                             )
                         )
                         
-                        # Lista de modelos corregida con el prefijo 'models/'
+                        # Modelos 100% compatibles con la v1beta de la API
                         modelos_a_probar = [
                             'models/gemini-2.5-flash',
                             'models/gemini-2.0-flash',
-                            'models/gemini-1.5-flash',
-                            'models/gemini-1.5-pro'
+                            'models/gemini-1.5-flash'
                         ]
                         
                         response = None
