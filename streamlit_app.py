@@ -174,32 +174,40 @@ else:
             """
 
             with st.chat_message("assistant"):
-                with st.spinner("Gotit está conectando con la IA (reintentando si hay alta demanda)..."):
+                with st.spinner("Gotit está procesando la consulta con balanceo automático..."):
                     try:
                         client = genai.Client(api_key=api_key.strip())
                         
+                        # Lista de modelos alternativos para evitar el bloqueo por 503
+                        modelos_candidatos = [
+                            'gemini-3.6-flash',
+                            'gemini-2.5-flash',
+                            'gemini-2.0-flash',
+                            'gemini-1.5-flash'
+                        ]
+
                         response = None
                         ultimo_error = None
-                        
-                        # Sistema de reintentos automáticos ante saturación de Google (503)
-                        for intento in range(4):
+
+                        for mod in modelos_candidatos:
                             try:
                                 response = client.models.generate_content(
-                                    model='gemini-3.6-flash',
+                                    model=mod,
                                     contents=prompt_completo
                                 )
                                 if response and response.text:
                                     break
                             except Exception as e:
                                 ultimo_error = e
-                                time.sleep(2) # Espera 2 segundos antes del siguiente intento automático
+                                time.sleep(1)
+                                continue
 
                         if response and response.text:
                             respuesta_final = response.text
                             st.write(respuesta_final)
                             st.session_state.mensajes.append({"rol": "assistant", "contenido": respuesta_final})
                         else:
-                            st.error(f"Google sigue saturado temporalmente. Por favor, probá de nuevo en unos segundos. Detalle técnico: {ultimo_error}")
+                            st.error(f"Los servidores de Google están experimentando alta demanda masiva en este momento. Probá de nuevo en un minuto. Detalle: {ultimo_error}")
 
                     except Exception as ex:
                         st.error(f"Error procesando la consulta: {ex}")
