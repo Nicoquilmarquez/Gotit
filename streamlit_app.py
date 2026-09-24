@@ -170,17 +170,33 @@ else:
                 with st.spinner("La IA está analizando los datos..."):
                     try:
                         clean_key = api_key.strip()
-                        genai.configure(api_key=clean_key)
+                        genai.configure(api_key=clean_key, client_options={"api_endpoint": "generativelanguage.googleapis.com"})
                         
-                        # Usar el modelo estándar y estable
-                        model = genai.GenerativeModel("gemini-1.5-flash")
-                        response = model.generate_content(prompt)
+                        # Fallback entre los modelos activos vigentes en la API
+                        modelos_vigentes = [
+                            "gemini-2.5-flash",
+                            "gemini-2.0-flash",
+                            "gemini-1.5-flash-latest"
+                        ]
+                        
+                        respuesta_exitosa = None
+                        ultimo_err = None
 
-                        if response and response.text:
-                            st.write(response.text)
-                            st.session_state.mensajes.append({"rol": "assistant", "contenido": response.text})
+                        for mod in modelos_vigentes:
+                            try:
+                                model = genai.GenerativeModel(mod)
+                                response = model.generate_content(prompt)
+                                if response and response.text:
+                                    respuesta_exitosa = response.text
+                                    break
+                            except Exception as ex:
+                                ultimo_err = ex
+
+                        if respuesta_exitosa:
+                            st.write(respuesta_exitosa)
+                            st.session_state.mensajes.append({"rol": "assistant", "contenido": respuesta_exitosa})
                         else:
-                            st.error("No se pudo obtener respuesta del modelo.")
+                            st.error(f"Error con los modelos de Gemini: {ultimo_err}")
 
                     except Exception as e:
                         st.error(f"Error de conexión con Gemini: {e}")
