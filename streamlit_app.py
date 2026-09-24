@@ -2,11 +2,10 @@ import streamlit as st
 import pandas as pd
 import os
 import pypdf
+import requests
 from PIL import Image
-from google import genai
-from google.genai import types
 
-# Configuración inicial de la app
+# 1. Configuración de página
 st.set_page_config(page_title="Gotit - Asistente IA", page_icon="🤖", layout="wide")
 
 USUARIO_CORRECTO = "admin"
@@ -17,9 +16,7 @@ GEMINI_API_KEY_DEFAULT = st.secrets.get("GEMINI_API_KEY", "")
 if "autenticado" not in st.session_state:
     st.session_state.autenticado = False
 
-# ----------------------------------------------------
-# PANTALLA 1: LOGIN
-# ----------------------------------------------------
+# 2. PANTALLA DE LOGIN
 if not st.session_state.autenticado:
     posibles_nombres = [
         "gotit logo.jpg", "gotit logo.png", "gotit logo.jpeg",
@@ -41,7 +38,7 @@ if not st.session_state.autenticado:
             st.image(imagen_cargada, width=180)
         
         st.title("Hola, soy Gotit")
-        st.subheader("Asistente Virtual para Recursos Humanos")
+        st.subheader("Asistente Virtual de Recursos Humanos")
         st.write("---")
 
         usuario = st.text_input("Usuario")
@@ -54,9 +51,7 @@ if not st.session_state.autenticado:
             else:
                 st.error("Credenciales incorrectas")
 
-# ----------------------------------------------------
-# PANTALLA 2: CONSULTAS POR BASE / HOJA DE DATOS
-# ----------------------------------------------------
+# 3. PANTALLA PRINCIPAL (CHAT CON DATOS)
 else:
     st.title("🤖 Asistente Virtual IA - Consultas de RH")
 
@@ -72,7 +67,7 @@ else:
             st.session_state.autenticado = False
             st.rerun()
 
-    # Carga dinámica de cualquier archivo u hoja seleccionada
+    # Función unificada de lectura de archivos y todas sus hojas
     @st.cache_data
     def cargar_documento(nombre_base):
         archivos = os.listdir(".")
@@ -85,7 +80,7 @@ else:
                 break
 
         if not archivo_encontrado:
-            return None, f"No se encontró el archivo relacionado con '{nombre_base}'."
+            return None, f"No se encontró el archivo '{nombre_base}' en el directorio."
 
         ext = os.path.splitext(archivo_encontrado)[1].lower()
         
@@ -115,9 +110,9 @@ else:
                 return ("texto", texto), archivo_encontrado
 
         except Exception as e:
-            return None, f"Error cargando {archivo_encontrado}: {e}"
+            return None, f"Error leyendo {archivo_encontrado}: {e}"
 
-        return None, "Formato no soportado."
+        return None, "Formato no compatible."
 
     doc_info, nombre_real_archivo = cargar_documento(opcion_base)
 
@@ -127,7 +122,7 @@ else:
             filas_totales = sum(len(df) for df in contenido.values())
             st.success(f"Base activa: **{opcion_base}** (`{nombre_real_archivo}`) — {filas_totales} filas cargadas en {len(contenido)} hoja(s).")
         else:
-            st.success(f"Documento activo: **{opcion_base}** (`{nombre_real_archivo}`) listo para consultas.")
+            st.success(f"Documento activo: **{opcion_base}** (`{nombre_real_archivo}`) cargado.")
     else:
         st.warning(f"⚠️ {nombre_real_archivo}")
 
@@ -138,13 +133,13 @@ else:
         with st.chat_message(msg["rol"]):
             st.write(msg["contenido"])
 
-    pregunta = st.chat_input(f"Preguntale algo a Gotit sobre {opcion_base}...")
+    pregunta = st.chat_input(f"Consulta sobre {opcion_base}...")
 
     if pregunta:
         if not api_key:
-            st.warning("⚠️ Configurá tu Gemini API Key en la barra lateral.")
+            st.warning("⚠️ Configurá la API Key de Gemini en el menú lateral.")
         elif doc_info is None:
-            st.error("⚠️ No se pudo leer la información de la base de datos.")
+            st.error("⚠️ No se pudo cargar la información del archivo.")
         else:
             st.session_state.mensajes.append({"rol": "user", "contenido": pregunta})
             with st.chat_message("user"):
@@ -156,52 +151,58 @@ else:
             if tipo == "excel":
                 for hoja, df in contenido.items():
                     contexto_str += f"\n--- HOJA: {hoja} ---\n"
-                    contexto_str += df.to_string(index=False) + "\n"
+                    contexto_str += df.head(250).to_string(index=False) + "\n"
             else:
-                contexto_str = contenido[:30000]
+                contexto_str = contenido[:20000]
 
             prompt_completo = f"""
-            Sos 'Gotit', el asistente inteligente de Recursos Humanos.
-            Usá la información de la base/documento '{opcion_base}' ({nombre_real_archivo}) para responder:
+            Sos 'Gotit', asistente virtual de Recursos Humanos. 
+            Basándote en los datos del documento '{opcion_base}' ({nombre_real_archivo}):
 
-            DATOS:
             {contexto_str}
 
-            PREGUNTA DEL USUARIO:
-            {pregunta}
+            PREGUNTA DEL USUARIO: {pregunta}
 
-            INSTRUCCIONES:
-            - Respondé de forma precisa y profesional basándote en los datos.
-            - Si hay múltiples hojas o filas, cruzá la información necesaria para responder correctamente.
+            Respondé con precisión y claridad profesional en base a la información provista.
             """
 
             with st.chat_message("assistant"):
-                with st.spinner("Procesando consulta con la IA..."):
+                with st.spinner("Procesando consulta..."):
                     try:
-                        # Inicializar el cliente oficial del SDK
-                        client = genai.Client(api_key=api_key.strip())
+                        key_clean = api_key.strip()
+                        
+                        # Endpoints HTTP estándar para máxima compatibilidad
+                        endpoints = [
+                            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={key_clean}",
+                            f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={key_clean}"
+                        ]
 
-                        # Probar modelos disponibles de la serie Gemini
-                        modelos_a_probar = ["gemini-2.0-flash", "gemini-1.5-flash"]
-                        respuesta_texto = None
+                        payload = {
+                            "contents": [{"parts": [{"text": prompt_completo}]}]
+                        }
 
-                        for mod in modelos_a_probar:
-                            try:
-                                response = client.models.generate_content(
-                                    model=mod,
-                                    contents=prompt_completo,
-                                )
-                                respuesta_texto = response.text
-                                if respuesta_texto:
-                                    break
-                            except Exception:
-                                continue
+                        headers = {
+                            "Content-Type": "application/json",
+                            "x-goog-api-key": key_clean
+                        }
 
-                        if respuesta_texto:
-                            st.write(respuesta_texto)
-                            st.session_state.mensajes.append({"rol": "assistant", "contenido": respuesta_texto})
+                        respuesta_final = None
+                        error_detalle = ""
+
+                        for url in endpoints:
+                            res = requests.post(url, json=payload, headers=headers, timeout=45)
+                            if res.status_code == 200:
+                                res_json = res.json()
+                                respuesta_final = res_json["candidates"][0]["content"]["parts"][0]["text"]
+                                break
+                            else:
+                                error_detalle += f"[{res.status_code}] {res.text} "
+
+                        if respuesta_final:
+                            st.write(respuesta_final)
+                            st.session_state.mensajes.append({"rol": "assistant", "contenido": respuesta_final})
                         else:
-                            st.error("No se pudo obtener respuesta del modelo. Verificá que la API Key sea válida.")
+                            st.error(f"Error de comunicación con la API: {error_detalle}")
 
                     except Exception as ex:
-                        st.error(f"Error durante la ejecución: {ex}")
+                        st.error(f"Error en la ejecución: {ex}")
