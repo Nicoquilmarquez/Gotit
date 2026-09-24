@@ -12,7 +12,7 @@ st.set_page_config(page_title="Gotit - Asistente IA", page_icon="🤖", layout="
 USUARIO_CORRECTO = "admin"
 CLAVE_CORRECTA = "123456"
 
-# Toma la API Key desde Secrets de Streamlit Cloud o se ingresa en el menú lateral
+# Toma la API Key desde Secrets de Streamlit Cloud o desde el menú lateral
 GEMINI_API_KEY_DEFAULT = st.secrets.get("GEMINI_API_KEY", "")
 
 if "autenticado" not in st.session_state:
@@ -174,10 +174,11 @@ else:
                     try:
                         clean_key = api_key.strip()
                         
-                        modelos_endpoints = [
-                            "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
-                            "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent",
-                            "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+                        # Definición de URLs probando primero la API v1 estándar y luego v1beta
+                        endpoints = [
+                            f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={clean_key}",
+                            f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-pro:generateContent?key={clean_key}",
+                            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={clean_key}"
                         ]
 
                         payload = {
@@ -191,14 +192,13 @@ else:
                         }
 
                         headers = {
-                            "Content-Type": "application/json",
-                            "x-goog-api-key": clean_key
+                            "Content-Type": "application/json"
                         }
 
                         respuesta_texto = None
                         ultimo_error = None
 
-                        for url_endpoint in modelos_endpoints:
+                        for url_endpoint in endpoints:
                             res = requests.post(url_endpoint, json=payload, headers=headers, timeout=60)
                             if res.status_code == 200:
                                 data = res.json()
