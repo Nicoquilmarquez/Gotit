@@ -5,14 +5,12 @@ import pypdf
 import requests
 from PIL import Image
 
-# Configuración de la página
+# Configuración de página
 st.set_page_config(page_title="Gotit - Asistente IA", page_icon="🤖", layout="wide")
 
-# Credenciales de acceso a la app
 USUARIO_CORRECTO = "admin"
 CLAVE_CORRECTA = "123456"
 
-# Toma la API Key desde Secrets de Streamlit Cloud o desde el menú lateral
 GEMINI_API_KEY_DEFAULT = st.secrets.get("GEMINI_API_KEY", "")
 
 if "autenticado" not in st.session_state:
@@ -56,7 +54,7 @@ if not st.session_state.autenticado:
             else:
                 st.error("Credenciales incorrectas")
 
-# PANTALLA 2: CHAT CON GEMINI Y SOPORTE PARA EXCEL, PDF Y TXT
+# PANTALLA 2: CHAT CON GEMINI Y DEPURACIÓN DE MODELOS
 else:
     st.title("🤖 Asistente Virtual IA para Recursos Humanos")
 
@@ -64,6 +62,23 @@ else:
         st.header("Configuración")
         api_key = st.text_input("Gemini API Key:", value=GEMINI_API_KEY_DEFAULT, type="password")
         opcion_base = st.selectbox("Seleccioná la base de datos:", ["Dota", "Registro", "Vacaciones", "Convenio", "CCT1.txt"])
+        
+        if st.button("Probar Modelos Disponibles"):
+            if not api_key:
+                st.error("Ingresá tu API Key primero.")
+            else:
+                clean_k = api_key.strip()
+                test_url = f"https://generativelanguage.googleapis.com/v1beta/models?key={clean_k}"
+                r = requests.get(test_url)
+                if r.status_code == 200:
+                    models_list = r.json().get("models", [])
+                    st.success("Modelos habilitados para tu API Key:")
+                    for m in models_list:
+                        if "generateContent" in m.get("supportedGenerationMethods", []):
+                            st.write(f"- `{m['name']}`")
+                else:
+                    st.error(f"Error listando modelos: {r.status_code} - {r.text}")
+
         if st.button("Cerrar Sesión"):
             st.session_state.autenticado = False
             st.rerun()
@@ -84,7 +99,6 @@ else:
 
         for archivo in posibles:
             if os.path.exists(archivo):
-                # 1. Archivos de texto (.txt)
                 if archivo.lower().endswith(".txt"):
                     try:
                         with open(archivo, "r", encoding="utf-8", errors="ignore") as f:
@@ -93,7 +107,6 @@ else:
                     except Exception as e:
                         return None, f"Error al leer TXT '{archivo}': {e}"
                 
-                # 2. Archivos PDF (.pdf)
                 elif archivo.lower().endswith(".pdf"):
                     try:
                         reader = pypdf.PdfReader(archivo)
@@ -106,7 +119,6 @@ else:
                     except Exception as e:
                         return None, f"Error al leer PDF '{archivo}': {e}"
                 
-                # 3. Planillas Excel y CSV
                 else:
                     try:
                         if archivo.lower().endswith((".xlsx", ".xls")):
@@ -174,11 +186,12 @@ else:
                     try:
                         clean_key = api_key.strip()
                         
-                        # Definición de URLs probando primero la API v1 estándar y luego v1beta
-                        endpoints = [
-                            f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={clean_key}",
-                            f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-pro:generateContent?key={clean_key}",
-                            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={clean_key}"
+                        # Endpoints con estructura canónica 'models/NOMBRE:generateContent'
+                        candidates_endpoints = [
+                            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={clean_key}",
+                            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={clean_key}",
+                            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={clean_key}",
+                            f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={clean_key}"
                         ]
 
                         payload = {
@@ -198,8 +211,8 @@ else:
                         respuesta_texto = None
                         ultimo_error = None
 
-                        for url_endpoint in endpoints:
-                            res = requests.post(url_endpoint, json=payload, headers=headers, timeout=60)
+                        for ep in candidates_endpoints:
+                            res = requests.post(ep, json=payload, headers=headers, timeout=60)
                             if res.status_code == 200:
                                 data = res.json()
                                 respuesta_texto = data["candidates"][0]["content"]["parts"][0]["text"]
@@ -211,7 +224,8 @@ else:
                             st.write(respuesta_texto)
                             st.session_state.mensajes.append({"rol": "assistant", "contenido": respuesta_texto})
                         else:
-                            st.error(f"Error al conectar con la API de Gemini: {ultimo_error}")
+                            st.error(f"Error con la API: {ultimo_error}")
 
                     except Exception as e:
-                        st.error(f"Error de ejecución: {e}")
+                        st.error(f"Error en la ejecución: {e}")
+                        
