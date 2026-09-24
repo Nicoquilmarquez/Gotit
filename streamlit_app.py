@@ -2,8 +2,7 @@ import streamlit as st
 import pandas as pd
 import os
 import pypdf
-from google import genai
-from google.genai import types
+import google.generativeai as genai
 from PIL import Image
 
 # Configuración de página
@@ -13,7 +12,7 @@ st.set_page_config(page_title="Gotit - Asistente IA", page_icon="🤖", layout="
 USUARIO_CORRECTO = "admin"
 CLAVE_CORRECTA = "123456"
 
-# Toma la API Key desde Secrets de Streamlit Cloud
+# API Key desde Secrets de Streamlit
 GEMINI_API_KEY_DEFAULT = st.secrets.get("GEMINI_API_KEY", "")
 
 if "autenticado" not in st.session_state:
@@ -85,7 +84,6 @@ else:
 
         for archivo in posibles:
             if os.path.exists(archivo):
-                # 1. Archivos TXT
                 if archivo.lower().endswith(".txt"):
                     try:
                         with open(archivo, "r", encoding="utf-8", errors="ignore") as f:
@@ -94,7 +92,6 @@ else:
                     except Exception as e:
                         return None, f"Error al leer TXT '{archivo}': {e}"
                 
-                # 2. Archivos PDF
                 elif archivo.lower().endswith(".pdf"):
                     try:
                         reader = pypdf.PdfReader(archivo)
@@ -107,7 +104,6 @@ else:
                     except Exception as e:
                         return None, f"Error al leer PDF '{archivo}': {e}"
                 
-                # 3. Planillas Excel y CSV
                 else:
                     try:
                         if archivo.lower().endswith((".xlsx", ".xls")):
@@ -174,41 +170,17 @@ else:
                 with st.spinner("La IA está analizando los datos..."):
                     try:
                         clean_key = api_key.strip()
+                        genai.configure(api_key=clean_key)
                         
-                        client = genai.Client(
-                            api_key=clean_key,
-                            http_options=types.HttpOptions(
-                                headers={"x-goog-api-key": clean_key}
-                            )
-                        )
-                        
-                        # Lista con nombres de modelos puros aceptados por la SDK actual
-                        modelos_a_probar = [
-                            'gemini-2.0-flash',
-                            'gemini-1.5-flash',
-                            'gemini-2.5-flash'
-                        ]
-                        
-                        response_text = None
-                        ultimo_error = None
+                        # Usar el modelo estándar y estable
+                        model = genai.GenerativeModel("gemini-1.5-flash")
+                        response = model.generate_content(prompt)
 
-                        for modelo in modelos_a_probar:
-                            try:
-                                res = client.models.generate_content(
-                                    model=modelo,
-                                    contents=prompt,
-                                )
-                                if res and hasattr(res, 'text') and res.text:
-                                    response_text = res.text
-                                    break
-                            except Exception as err:
-                                ultimo_error = err
-
-                        if response_text:
-                            st.write(response_text)
-                            st.session_state.mensajes.append({"rol": "assistant", "contenido": response_text})
+                        if response and response.text:
+                            st.write(response.text)
+                            st.session_state.mensajes.append({"rol": "assistant", "contenido": response.text})
                         else:
-                            st.error(f"Error al conectar con la API de Gemini: {ultimo_error}")
+                            st.error("No se pudo obtener respuesta del modelo.")
 
                     except Exception as e:
-                        st.error(f"Error de conexión: {e}")
+                        st.error(f"Error de conexión con Gemini: {e}")
