@@ -5,7 +5,7 @@ import pypdf
 import requests
 from PIL import Image
 
-# Configuración de página
+# Configuración de la página
 st.set_page_config(page_title="Gotit - Asistente IA", page_icon="🤖", layout="wide")
 
 USUARIO_CORRECTO = "admin"
@@ -16,7 +16,9 @@ GEMINI_API_KEY_DEFAULT = st.secrets.get("GEMINI_API_KEY", "")
 if "autenticado" not in st.session_state:
     st.session_state.autenticado = False
 
+# ----------------------------------------------------
 # 1. PANTALLA DE LOGIN
+# ----------------------------------------------------
 if not st.session_state.autenticado:
     posibles_nombres = [
         "gotit logo.jpg", "gotit logo.png", "gotit logo.jpeg",
@@ -51,7 +53,9 @@ if not st.session_state.autenticado:
             else:
                 st.error("Credenciales incorrectas")
 
-# 2. PANTALLA PRINCIPAL Y CONSULTA IA
+# ----------------------------------------------------
+# 2. PANTALLA PRINCIPAL
+# ----------------------------------------------------
 else:
     st.title("🤖 Asistente Virtual IA - Consultas de RH")
 
@@ -173,43 +177,42 @@ else:
                 with st.spinner("Gotit está analizando los datos..."):
                     try:
                         key_clean = api_key.strip()
+                        headers = {"Content-Type": "application/json"}
 
-                        # Lista de nombres exactos aceptados por la API
-                        modelos_candidatos = [
-                            "gemini-1.5-flash-latest",
-                            "gemini-2.0-flash",
-                            "gemini-2.0-flash-exp",
-                            "gemini-1.5-pro",
-                            "gemini-flash"
-                        ]
+                        # 1. Obtener dinámicamente la lista de modelos disponibles para esta API Key
+                        list_url = f"https://generativelanguage.googleapis.com/v1beta/models?key={key_clean}"
+                        res_list = requests.get(list_url, headers=headers, timeout=15)
+                        
+                        modelo_elegido = None
 
-                        payload = {
-                            "contents": [{"parts": [{"text": prompt_completo}]}]
-                        }
+                        if res_list.status_code == 200:
+                            data_models = res_list.json().get("models", [])
+                            for m in data_models:
+                                # Buscar modelos que acepten generación de contenido
+                                methods = m.get("supportedGenerationMethods", [])
+                                if "generateContent" in methods:
+                                    modelo_elegido = m.get("name") # ej: 'models/gemini-1.5-flash' o similar
+                                    break
+                        
+                        # Si no pudo listar, usar fallback por defecto
+                        if not modelo_elegido:
+                            modelo_elegido = "models/gemini-1.5-flash"
 
-                        headers = {
-                            "Content-Type": "application/json",
-                            "x-goog-api-key": key_clean
-                        }
+                        # Remover prefijo si viniera duplicado
+                        nombre_modelo = modelo_elegido.replace("models/", "")
 
-                        respuesta_final = None
-                        errores = []
+                        # 2. Realizar la consulta a la API con el modelo verificado
+                        gen_url = f"https://generativelanguage.googleapis.com/v1beta/models/{nombre_modelo}:generateContent?key={key_clean}"
+                        payload = {"contents": [{"parts": [{"text": prompt_completo}]}]}
 
-                        for mod in modelos_candidatos:
-                            url = f"https://generativelanguage.googleapis.com/v1beta/models/{mod}:generateContent?key={key_clean}"
-                            res = requests.post(url, json=payload, headers=headers, timeout=45)
-                            if res.status_code == 200:
-                                res_json = res.json()
-                                respuesta_final = res_json["candidates"][0]["content"]["parts"][0]["text"]
-                                break
-                            else:
-                                errores.append(f"Model {mod}: HTTP {res.status_code}")
+                        res_gen = requests.post(gen_url, json=payload, headers=headers, timeout=45)
 
-                        if respuesta_final:
+                        if res_gen.status_code == 200:
+                            respuesta_final = res_gen.json()["candidates"][0]["content"]["parts"][0]["text"]
                             st.write(respuesta_final)
                             st.session_state.mensajes.append({"rol": "assistant", "contenido": respuesta_final})
                         else:
-                            st.error(f"No se pudo consultar la API. Detalles: {', '.join(errores)}")
+                            st.error(f"Error {res_gen.status_code} al consultar el modelo '{nombre_modelo}': {res_gen.text}")
 
                     except Exception as ex:
-                        st.error(f"Error inesperado: {ex}")
+                        st.error(f"Error en la ejecución: {ex}")
